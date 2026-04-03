@@ -71,10 +71,10 @@ void main() {
   // Occasional sharp horizontal slices based on time
   float glitchTime = floor(u_time * 6.0); // glitch update rate (slower)
   float glitchTrigger = hash1(glitchTime);
-  float isGlitch = step(0.98, glitchTrigger); // 2% chance of glitch active
+  float isGlitch = step(0.999, glitchTrigger); // Practically eliminated glitch chance
   
   float sliceY = floor(uv.y * 25.0);
-  float sliceDisp = (hash(vec2(sliceY, glitchTime)) - 0.5) * 0.08; // less displacement
+  float sliceDisp = (hash(vec2(sliceY, glitchTime)) - 0.5) * 0.005; // invisible displacement
   uv.x += sliceDisp * isGlitch;
 
   // Blank out if UV gets distorted out of bounds
@@ -85,7 +85,7 @@ void main() {
 
   // ── 2. Chromatic aberration sample ───────────────────────────────────────────
   // Base CA + large spike during glitch
-  float CA = 0.0004 + (isGlitch * 0.025 * hash1(glitchTime * 2.1));
+  float CA = 0.0004 + (isGlitch * 0.008 * hash1(glitchTime * 2.1));
 
   float r = texture2D(u_tex, uv + vec2( CA,      0.0)).r;
   float g = texture2D(u_tex, uv                     ).g;
@@ -113,9 +113,9 @@ void main() {
     col.b * 1.25 + col.g * 0.08 + 0.12
   );
   
-  // Shift colors violently during glitch
+  // Shift colors gently during glitch
   vec2 glitchSeed = vec2(uv.y, u_time);
-  holo = mix(holo, holo.gbr * 1.8, isGlitch * hash(glitchSeed));
+  holo = mix(holo, holo.gbr * 1.25, isGlitch * hash(glitchSeed));
 
   // Blend bright highlights back toward natural
   holo = mix(holo, col * vec3(0.55, 0.92, 1.08), smoothstep(0.50, 0.80, luma));
@@ -164,7 +164,10 @@ void main() {
   float finalA   = alpha * scanMod * bottomFade * u_flicker;
   
   // Rectangular smooth blend (blur out edges to merge with page)
-  float blendX = smoothstep(0.0, 0.14, min(uv.x, 1.0 - uv.x)); // Soften left & right borders ONLY
+  // We keep the left edge perfectly soft, but remove the right-side fade so it organically touches the right screen edge.
+  float blendLeft = smoothstep(0.0, 0.14, uv.x); 
+  float blendRight = smoothstep(0.0, 0.01, 1.0 - uv.x); // tiny 1% anti-alias for right edge
+  float blendX = blendLeft * blendRight;
   finalA *= blendX;
 
   // Random static noise on the edges
@@ -330,7 +333,7 @@ export default function JoiHologram() {
       flickerTimer += dt;
       if (!inFlicker && flickerTimer >= nextFlicker) {
         inFlicker = true; flickerPhase = 0; flickerTimer = 0;
-        nextFlicker = Math.random() * 5 + 2.5;
+        nextFlicker = Math.random() * 12 + 6.0; // Extensively reduced flicker rate
       }
       if (inFlicker) {
         flickerPhase += dt * 14;
@@ -394,16 +397,20 @@ export default function JoiHologram() {
 
       <div
         ref={wrapRef}
-        className="pointer-events-none absolute bottom-0 right-0 z-10"
+        className="pointer-events-none fixed bottom-0 right-0 z-10"
         style={{
-          height: "clamp(450px, 75vh, 950px)",
-          width: "clamp(250px, 42vh, 550px)",
+          height: "100vh",
+          width: "100%",
           animation: ready
             ? "hologramRise 1.8s cubic-bezier(0.22,1,0.36,1) both"
             : "none",
         }}
       >
-        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" style={{ objectFit: "contain" }} />
+        <canvas 
+           ref={canvasRef} 
+           className="absolute inset-0 h-full w-full" 
+           style={{ objectFit: "contain", objectPosition: "right bottom" }} 
+        />
 
       </div>
     </>
