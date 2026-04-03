@@ -64,49 +64,53 @@ function drawSpeedOverlay(
   if (intensity <= 0 && voidPull <= 0) return;
 
   const cx = W / 2; const cy = H / 2;
+  const maxR = Math.max(1, Math.hypot(cx, cy));
 
-  // ── radial streak lines ──────────────────────────────────────────────────
-  const streaks = Math.floor(intensity * 220);
+  // ── radial streak lines (optimized: no gradients, no per-frame Math.random) ──
+  const streakMax = 160;
+  const streaks = Math.max(1, Math.round(intensity * streakMax));
+  const r0 = intensity * 30;
+  const r1 = 0.72 * maxR;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgb(254,128,25)";
+
   for (let i = 0; i < streaks; i++) {
     const angle = (i / streaks) * Math.PI * 2;
-    const r0 = intensity * 40;
-    const r1 = 0.72 * Math.sqrt(cx * cx + cy * cy);
     const x0 = cx + Math.cos(angle) * r0;
     const y0 = cy + Math.sin(angle) * r0;
     const x1 = cx + Math.cos(angle) * r1;
     const y1 = cy + Math.sin(angle) * r1;
 
-    const g = ctx.createLinearGradient(x0, y0, x1, y1);
-    // warm amber → orange streak
-    const alpha = intensity * (0.12 + Math.random() * 0.08);
-    g.addColorStop(0,   `rgba(254,128,25,${alpha})`);
-    g.addColorStop(0.5, `rgba(214,93,14,${alpha * 0.6})`);
-    g.addColorStop(1,   `rgba(0,0,0,0)`);
+    // deterministic variation so we still look “alive” without allocations
+    const u = (i * 0.61803398875) % 1; // pseudo-random in [0,1)
+    const alpha = intensity * (0.06 + u * 0.10) * (0.35 + voidPull * 0.65);
+    const lw = 0.7 + u * 1.2;
 
-    ctx.strokeStyle = g;
-    ctx.lineWidth = 0.8 + Math.random() * 1.2;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = lw;
     ctx.beginPath();
     ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y1);
     ctx.stroke();
   }
+  ctx.restore();
 
-  // ── chromatic aberration rings ────────────────────────────────────────────
-  if (intensity > 0.25) {
-    const ca = (intensity - 0.25) / 0.75;
-    const numRings = 3;
-    for (let r = 0; r < numRings; r++) {
-      const rr = (80 + r * 55) * ca;
-      const gring = ctx.createRadialGradient(cx, cy, rr * 0.85, cx, cy, rr * 1.1);
-      gring.addColorStop(0, `rgba(251,72,196,0)`);
-      gring.addColorStop(0.45, `rgba(251,72,196,${ca * 0.06})`);
-      gring.addColorStop(0.55, `rgba(80,200,255,${ca * 0.06})`);
-      gring.addColorStop(1, `rgba(80,200,255,0)`);
-      ctx.fillStyle = gring;
-      ctx.beginPath();
-      ctx.arc(cx, cy, rr * 1.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  // ── single speed ring (cheap) ───────────────────────────────────────────────
+  if (intensity > 0.22) {
+    const ca = (intensity - 0.22) / 0.78;
+    const rr = (maxR * 0.22 + 20) * ca + maxR * 0.02;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = ca * 0.15 * (0.4 + voidPull * 0.6);
+    ctx.strokeStyle = "rgba(80,200,255,1)";
+    ctx.lineWidth = 1.2 + ca * 2.0;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ── centre bright hot-spot (approaching singularity) ─────────────────────
@@ -135,7 +139,12 @@ function drawSpeedOverlay(
 
 // ─── CSS blur helper ──────────────────────────────────────────────────────────
 function setRendererBlur(el: HTMLCanvasElement, px: number) {
-  el.style.filter = px > 0.2 ? `blur(${px.toFixed(2)}px)` : "";
+  // Avoid spamming style changes every frame (reduces GPU churn/lag)
+  const anyEl = el as any;
+  const last = typeof anyEl._lastBlurPx === "number" ? (anyEl._lastBlurPx as number) : -1;
+  if (Math.abs(last - px) < 0.15) return;
+  anyEl._lastBlurPx = px;
+  el.style.filter = px > 0.25 ? `blur(${px}px)` : "";
 }
 
 export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
@@ -160,10 +169,11 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     camera.position.set(0, 3, 15);
 
     const renderer = new THREE.WebGLRenderer({
-      alpha: true, antialias: true, powerPreference: "high-performance",
+      alpha: true, antialias: false, powerPreference: "high-performance",
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // cap pixel ratio for buttery smooth motion
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
@@ -204,10 +214,12 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     ];
 
     // accretion disk
-    const diskCount = 72_000;
+    const diskCount = 92_000;
     const dPos = new Float32Array(diskCount * 3);
     const dCol = new Float32Array(diskCount * 3);
     const dSeed = new Float32Array(diskCount);
+    const dRespawnR = new Float32Array(diskCount);
+    const dRespawnA = new Float32Array(diskCount);
     for (let i = 0; i < diskCount; i++) {
       const r = 2.65 + Math.random() * 9.5;
       const a = Math.random() * Math.PI * 2;
@@ -217,6 +229,8 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
       const c = palette[Math.floor(Math.random() * palette.length)];
       dCol[i*3]=c.r; dCol[i*3+1]=c.g; dCol[i*3+2]=c.b;
       dSeed[i] = Math.random() * Math.PI * 2;
+      dRespawnR[i] = 9 + Math.random() * 7;
+      dRespawnA[i] = Math.random() * Math.PI * 2;
     }
     const diskGeo = new THREE.BufferGeometry();
     diskGeo.setAttribute("position", new THREE.BufferAttribute(dPos, 3));
@@ -229,15 +243,19 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     scene.add(disk);
 
     // inner mist
-    const mistCount = 18_000;
+    const mistCount = 26_000;
     const mPos = new Float32Array(mistCount * 3);
     const mCol = new Float32Array(mistCount * 3);
+    const mRespawnR = new Float32Array(mistCount);
+    const mRespawnA = new Float32Array(mistCount);
     for (let i = 0; i < mistCount; i++) {
       const r = 2.55 + Math.random() * 3.2;
       const a = Math.random() * Math.PI * 2;
       mPos[i*3]=Math.cos(a)*r; mPos[i*3+1]=(Math.random()-0.5)*0.12; mPos[i*3+2]=Math.sin(a)*r;
       const c = palette[Math.floor(Math.random()*palette.length)];
       mCol[i*3]=c.r*1.1; mCol[i*3+1]=c.g*1.1; mCol[i*3+2]=c.b*1.1;
+      mRespawnR[i] = 4.5 + Math.random() * 2;
+      mRespawnA[i] = Math.random() * Math.PI * 2;
     }
     const mistGeo = new THREE.BufferGeometry();
     mistGeo.setAttribute("position", new THREE.BufferAttribute(mPos, 3));
@@ -299,19 +317,36 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     let hasEntered = false;
     let enterAccum = 0;
 
-    // shake offset
-    let shakeX = 0, shakeY = 0;
+    // Interaction / shaking state
+    let prevStage = stageRef.current;
+    let enteringKick = 0; // 0→1 right after cross event horizon
+    let touchNx = 0;      // -1→1
+    let touchNy = 0;      // -1→1
+    let touchStrength = 0; // 0→1-ish, decays each frame
+    let pointerActive = false;
+    let pointerId: number | null = null;
+
+    // Deterministic shake (no Math.random in the render loop)
+    let shakePhase = 0;
 
     const animate = (timestamp: number) => {
       rafId = requestAnimationFrame(animate);
       timer.update(timestamp);
 
       const s = stageRef.current;
+      if (s !== prevStage) {
+        if (s === "entering") enteringKick = 1;
+        prevStage = s;
+      }
       if (s === "pre-intro" || s === "home") return;
       if (s !== "intro" && s !== "entering") return;
 
       const delta   = timer.getDelta();
       const elapsed = timer.getElapsed();
+      shakePhase += delta * 1.0;
+
+      // decay touch influence quickly for “snappy but smooth”
+      touchStrength = Math.max(0, touchStrength - delta * 2.6);
 
       // ── passive orbit (intro) ──────────────────────────────────────────────
       stars.rotation.y -= delta * 0.012;
@@ -328,37 +363,70 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
         suckMult = 1 + easeInCubic(t) * 18; // 1× → 19× pull rate
       }
 
+      // touch influence (only when user is touching/clicking)
+      const touchInfluence = touchStrength * (s === "entering" ? 1.15 : 0.75);
+
       for (let i = 0; i < diskCount; i++) {
         let x = posAttr.array[i*3], z = posAttr.array[i*3+2];
-        let r = Math.hypot(x, z);
+        let r = Math.sqrt(x*x + z*z);
         let angle = Math.atan2(z, x);
         const omega = (0.55 + 1.4 / Math.max(r, 0.45)) * (s === "entering" ? suckMult * 0.7 : 1);
         angle += delta * omega;
         r -= delta * (0.22 + r * 0.018) * suckMult;
         if (r < 2.58) {
-          r = 9 + Math.random() * 7;
-          angle = Math.random() * Math.PI * 2;
+          r = dRespawnR[i];
+          angle = dRespawnA[i] + dSeed[i] * 0.08;
+        }
+        let cosA = Math.cos(angle);
+        let sinA = Math.sin(angle);
+
+        if (touchInfluence > 0.0001) {
+          const align = Math.max(0, touchNx * cosA + touchNy * sinA); // directionally aligned with touch
+          const tf = touchInfluence * align;
+          angle += delta * tf * 4.2; // tangential “flow”
+          r     -= delta * tf * (s === "entering" ? 0.30 : 0.20); // radial shift
+          // `angle` changed above; recompute for correct final position
+          cosA = Math.cos(angle);
+          sinA = Math.sin(angle);
         }
         const wave =
-          Math.sin(angle*5 + elapsed*1.8 + dSeed[i]) * 0.18 * (1 / Math.max(r, 1));
+          Math.sin(angle*5 + elapsed*1.8 + dSeed[i]) *
+          0.18 *
+          (1 / Math.max(r, 1)) *
+          (1 + touchInfluence * 0.25);
         const y = wave + Math.cos(angle*3 + elapsed*1.2 + dSeed[i]*2) * 0.08;
-        posAttr.array[i*3]   = Math.cos(angle) * r;
+        posAttr.array[i*3]   = cosA * r;
         posAttr.array[i*3+1] = y;
-        posAttr.array[i*3+2] = Math.sin(angle) * r;
+        posAttr.array[i*3+2] = sinA * r;
       }
       posAttr.needsUpdate = true;
 
       for (let i = 0; i < mistCount; i++) {
         let x = mistAttr.array[i*3], z = mistAttr.array[i*3+2];
-        let r = Math.hypot(x, z);
+        let r = Math.sqrt(x*x + z*z);
         let angle = Math.atan2(z, x);
         angle += delta * (0.9 + 2.2 / Math.max(r, 0.35)) * (s === "entering" ? suckMult * 0.8 : 1);
         r -= delta * (0.35 + r * 0.04) * suckMult;
-        if (r < 2.52) { r = 4.5 + Math.random() * 2; angle = Math.random() * Math.PI * 2; }
+        if (r < 2.52) {
+          r = mRespawnR[i];
+          angle = mRespawnA[i];
+        }
+        let cosA = Math.cos(angle);
+        let sinA = Math.sin(angle);
+
+        if (touchInfluence > 0.0001) {
+          const align = Math.max(0, touchNx * cosA + touchNy * sinA);
+          const tf = touchInfluence * align;
+          angle += delta * tf * 3.4;
+          r     -= delta * tf * (s === "entering" ? 0.25 : 0.17);
+          // `angle` changed above; recompute for correct final position
+          cosA = Math.cos(angle);
+          sinA = Math.sin(angle);
+        }
         const y = Math.sin(angle*8 + elapsed*2.5 + i*0.01) * 0.06 * (1 / Math.max(r, 1));
-        mistAttr.array[i*3]   = Math.cos(angle) * r;
+        mistAttr.array[i*3]   = cosA * r;
         mistAttr.array[i*3+1] = y;
-        mistAttr.array[i*3+2] = Math.sin(angle) * r;
+        mistAttr.array[i*3+2] = sinA * r;
       }
       mistAttr.needsUpdate = true;
 
@@ -374,6 +442,8 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
         enterAccum += delta;
         const t  = Math.min(1, enterAccum / ENTER_SECONDS);
         const e  = easeInOutCubic(t);
+        const kickT = Math.max(0, 1 - t / 0.85);
+        const kick  = enteringKick * kickT;
 
         // ── camera pull: smooth spiral into singularity ────────────────────
         // phase 1 (0→0.6): graceful approach spiral
@@ -388,13 +458,14 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
           THREE.MathUtils.lerp(3, 0.05, e) +
           Math.cos(t * Math.PI * 4)   * 0.5  * (1 - snapE);
 
-        // ── camera shake ────────────────────────────────────────────────────
-        if (t > 0.35) {
-          const shakeAmt = easeInCubic((t - 0.35) / 0.65) * 0.22;
-          shakeX = (Math.random() - 0.5) * shakeAmt;
-          shakeY = (Math.random() - 0.5) * shakeAmt;
-          camera.position.x += shakeX;
-          camera.position.y += shakeY;
+        // ── camera shake (rapid + smooth, deterministic) ────────────────────
+        const shakeBase = kick * 0.26 + touchStrength * 0.18;
+        if (shakeBase > 0.0001) {
+          // smooth oscillation + touch-direction offset
+          const sx = Math.sin(elapsed * 38.0);
+          const sy = Math.cos(elapsed * 33.0);
+          camera.position.x += (sx * 0.55 + touchNx * 0.65) * shakeBase;
+          camera.position.y += (sy * 0.50 + touchNy * 0.55) * shakeBase;
         }
 
         // ── FOV warp (fish-eye suck effect) ────────────────────────────────
@@ -454,8 +525,50 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     };
     window.addEventListener("resize", handleResize);
 
+    const setTouchFromClient = (clientX: number, clientY: number) => {
+      const nx = (clientX / Math.max(1, window.innerWidth) - 0.5) * 2;
+      const ny = (clientY / Math.max(1, window.innerHeight) - 0.5) * 2;
+      const dist = Math.hypot(nx, ny);
+      // “near” center -> stronger effect
+      const near = Math.max(0, 1 - dist / 0.85);
+      touchNx = nx;
+      touchNy = ny;
+      touchStrength = Math.max(touchStrength, near * 1.15);
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (stageRef.current !== "intro" && stageRef.current !== "entering") return;
+      pointerActive = true;
+      pointerId = e.pointerId;
+      // prevent accidental page interactions while we "grab" the void
+      setTouchFromClient(e.clientX, e.clientY);
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!pointerActive) return;
+      if (pointerId !== null && e.pointerId !== pointerId) return;
+      if (stageRef.current !== "intro" && stageRef.current !== "entering") return;
+      setTouchFromClient(e.clientX, e.clientY);
+    };
+
+    const onPointerUpOrCancel = (e: PointerEvent) => {
+      if (pointerId !== null && e.pointerId !== pointerId) return;
+      pointerActive = false;
+      pointerId = null;
+    };
+
+    renderer.domElement.style.touchAction = "none";
+    containerRef.current.addEventListener("pointerdown", onPointerDown, { passive: true });
+    containerRef.current.addEventListener("pointermove", onPointerMove, { passive: true });
+    containerRef.current.addEventListener("pointerup", onPointerUpOrCancel, { passive: true });
+    containerRef.current.addEventListener("pointercancel", onPointerUpOrCancel, { passive: true });
+
     return () => {
       window.removeEventListener("resize", handleResize);
+      containerRef.current?.removeEventListener("pointerdown", onPointerDown);
+      containerRef.current?.removeEventListener("pointermove", onPointerMove);
+      containerRef.current?.removeEventListener("pointerup", onPointerUpOrCancel);
+      containerRef.current?.removeEventListener("pointercancel", onPointerUpOrCancel);
       cancelAnimationFrame(rafId);
       timer.dispose();
       if (nebulaTex) nebulaTex.dispose();
@@ -472,6 +585,8 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
   }, []);
 
   return (
-    <div ref={containerRef} className="pointer-events-none relative h-full w-full" />
+    // pointer events are enabled for touch-driven particle pushing/shaking
+    // (no cursor-pointer styling; keep normal cursor)
+    <div ref={containerRef} className="relative h-full w-full cursor-default" />
   );
 }
