@@ -4,7 +4,7 @@ import { motion, useAnimation, useMotionValue, useTransform } from "framer-motio
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { BlackHoleScene, type BlackHoleStage } from "./BlackHoleScene";
+import { BlackHoleScene, type BlackHoleStage } from "@/components/blackhole/BlackHoleScene";
 
 type BlackHoleIntroGateProps = {
   children: ReactNode;
@@ -66,7 +66,7 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
           opacity: stage === "intro" || stage === "entering" ? 1 : 0,
           scale:   stage === "intro" || stage === "entering" ? 1 : 1.12,
         }}
-        transition={{ duration: 1.2, ease: "easeInOut" }}
+        transition={{ duration: 1.65, ease: [0.4, 0, 0.2, 1] }}
         style={{
           pointerEvents: stage === "intro" || stage === "entering" ? "auto" : "none",
         }}

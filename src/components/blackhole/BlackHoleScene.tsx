@@ -17,15 +17,47 @@ type BlackHoleSceneProps = {
 };
 
 // ─── timing ──────────────────────────────────────────────────────────────────
-const ENTER_SECONDS = 7.5;   // total flight duration
-const ENTER_TRIGGER = 0.84;  // when onEntered fires (just before void snap)
+const ENTER_SECONDS = 11;    // longer = smoother suck-in transition
+const ENTER_TRIGGER = 0.82;  // when onEntered fires (just before void snap)
+
+// Pointer → particle coupling (user asked ~5× more responsive)
+const INTERACTION_GAIN = 5;
 
 // ─── easing ──────────────────────────────────────────────────────────────────
 function easeInCubic(t: number) { return t * t * t; }
 function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
+function easeInOutQuint(t: number) {
+  return t < 0.5 ? 16 * t * t * t * t * t : 1 - Math.pow(-2 * t + 2, 5) / 2;
+}
 function easeOutQuart(t: number) { return 1 - Math.pow(1 - t, 4); }
+
+// ─── disk points shader (per-particle size: tiny at spiral edges) ───────────
+const DISK_POINT_VERT = `
+attribute float size;
+attribute vec3 color;
+varying vec3 vColor;
+uniform float uPointScale;
+void main() {
+  vColor = color;
+  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  float d = -mvPosition.z;
+  float s = size * uPointScale * (420.0 / max(d, 0.75));
+  gl_PointSize = clamp(s, 1.0, 128.0);
+  gl_Position = projectionMatrix * mvPosition;
+}
+`;
+const DISK_POINT_FRAG = `
+varying vec3 vColor;
+void main() {
+  vec2 c = gl_PointCoord * 2.0 - 1.0;
+  float r2 = dot(c, c);
+  if (r2 > 1.0) discard;
+  float edge = smoothstep(1.0, 0.25, r2);
+  gl_FragColor = vec4(vColor, 0.86 * edge);
+}
+`;
 
 // ─── nebula canvas ───────────────────────────────────────────────────────────
 function makeNebulaTexture() {
@@ -213,37 +245,50 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
       new THREE.Color("#b16286"),
     ];
 
-    // accretion disk
-    const diskCount = 92_000;
+    // accretion disk — 5× prior density; outer spiral particles are much smaller
+    const diskCount = 460_000;
+    const R_DISK_MIN = 2.65;
+    const R_DISK_MAX = 12.15;
     const dPos = new Float32Array(diskCount * 3);
     const dCol = new Float32Array(diskCount * 3);
     const dSeed = new Float32Array(diskCount);
     const dRespawnR = new Float32Array(diskCount);
     const dRespawnA = new Float32Array(diskCount);
+    const dSize = new Float32Array(diskCount);
     for (let i = 0; i < diskCount; i++) {
-      const r = 2.65 + Math.random() * 9.5;
+      // bias samples toward outer radii so the spiral edge feels “filled”
+      const u = Math.pow(Math.random(), 0.52);
+      const r = R_DISK_MIN + u * (R_DISK_MAX - R_DISK_MIN);
       const a = Math.random() * Math.PI * 2;
       dPos[i*3]   = Math.cos(a) * r;
-      dPos[i*3+1] = (Math.random() - 0.5) * 0.35 * (1 / Math.max(r, 0.6));
+      dPos[i*3+1] = (Math.random() - 0.5) * 0.28 * (1 / Math.max(r, 0.6));
       dPos[i*3+2] = Math.sin(a) * r;
       const c = palette[Math.floor(Math.random() * palette.length)];
       dCol[i*3]=c.r; dCol[i*3+1]=c.g; dCol[i*3+2]=c.b;
       dSeed[i] = Math.random() * Math.PI * 2;
       dRespawnR[i] = 9 + Math.random() * 7;
       dRespawnA[i] = Math.random() * Math.PI * 2;
+      const edge = (r - R_DISK_MIN) / (R_DISK_MAX - R_DISK_MIN);
+      // inner bright specks → outer dust (much tinier)
+      dSize[i] = THREE.MathUtils.lerp(0.026, 0.0028, Math.pow(edge, 0.95));
     }
     const diskGeo = new THREE.BufferGeometry();
     diskGeo.setAttribute("position", new THREE.BufferAttribute(dPos, 3));
     diskGeo.setAttribute("color",    new THREE.BufferAttribute(dCol, 3));
-    const diskMat = new THREE.PointsMaterial({
-      size: 0.028, vertexColors: true, transparent: true, opacity: 0.85,
-      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    diskGeo.setAttribute("size",     new THREE.BufferAttribute(dSize, 1));
+    const diskMat = new THREE.ShaderMaterial({
+      uniforms: { uPointScale: { value: 1.05 } },
+      vertexShader: DISK_POINT_VERT,
+      fragmentShader: DISK_POINT_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
     const disk = new THREE.Points(diskGeo, diskMat);
     scene.add(disk);
 
-    // inner mist
-    const mistCount = 26_000;
+    // inner mist — 5× prior count, slightly smaller points
+    const mistCount = 130_000;
     const mPos = new Float32Array(mistCount * 3);
     const mCol = new Float32Array(mistCount * 3);
     const mRespawnR = new Float32Array(mistCount);
@@ -261,7 +306,7 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     mistGeo.setAttribute("position", new THREE.BufferAttribute(mPos, 3));
     mistGeo.setAttribute("color",    new THREE.BufferAttribute(mCol, 3));
     const mistMat = new THREE.PointsMaterial({
-      size: 0.018, vertexColors: true, transparent: true, opacity: 0.55,
+      size: 0.012, vertexColors: true, transparent: true, opacity: 0.52,
       depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
     });
     const mist = new THREE.Points(mistGeo, mistMat);
@@ -320,14 +365,12 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     // Interaction / shaking state
     let prevStage = stageRef.current;
     let enteringKick = 0; // 0→1 right after cross event horizon
-    let touchNx = 0;      // -1→1
-    let touchNy = 0;      // -1→1
-    let touchStrength = 0; // 0→1-ish, decays each frame
+    let touchNx = 0;      // -1→1 (last pointer — mouse hover or touch)
+    let touchNy = 0;
+    let touchStrength = 0; // press / drag strength
+    let mouseHover = 0;    // mouse “pointing” near centre (no click)
     let pointerActive = false;
     let pointerId: number | null = null;
-
-    // Deterministic shake (no Math.random in the render loop)
-    let shakePhase = 0;
 
     const animate = (timestamp: number) => {
       rafId = requestAnimationFrame(animate);
@@ -343,10 +386,9 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
 
       const delta   = timer.getDelta();
       const elapsed = timer.getElapsed();
-      shakePhase += delta * 1.0;
-
-      // decay touch influence quickly for “snappy but smooth”
-      touchStrength = Math.max(0, touchStrength - delta * 2.6);
+      // smooth decay so motion stays flowy
+      touchStrength = Math.max(0, touchStrength - delta * 1.9);
+      mouseHover    = Math.max(0, mouseHover - delta * 1.35);
 
       // ── passive orbit (intro) ──────────────────────────────────────────────
       stars.rotation.y -= delta * 0.012;
@@ -363,14 +405,14 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
         suckMult = 1 + easeInCubic(t) * 18; // 1× → 19× pull rate
       }
 
-      // touch influence (only when user is touching/clicking)
-      const touchInfluence = touchStrength * (s === "entering" ? 1.15 : 0.75);
+      // combined pointer influence: hover (mouse) + press/drag — scaled by INTERACTION_GAIN
+      const influence = Math.max(mouseHover, touchStrength);
 
       for (let i = 0; i < diskCount; i++) {
         let x = posAttr.array[i*3], z = posAttr.array[i*3+2];
         let r = Math.sqrt(x*x + z*z);
         let angle = Math.atan2(z, x);
-        const omega = (0.55 + 1.4 / Math.max(r, 0.45)) * (s === "entering" ? suckMult * 0.7 : 1);
+        const omega = (0.52 + 1.35 / Math.max(r, 0.45)) * (s === "entering" ? suckMult * 0.68 : 1);
         angle += delta * omega;
         r -= delta * (0.22 + r * 0.018) * suckMult;
         if (r < 2.58) {
@@ -380,11 +422,11 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
         let cosA = Math.cos(angle);
         let sinA = Math.sin(angle);
 
-        if (touchInfluence > 0.0001) {
-          const align = Math.max(0, touchNx * cosA + touchNy * sinA); // directionally aligned with touch
-          const tf = touchInfluence * align;
-          angle += delta * tf * 4.2; // tangential “flow”
-          r     -= delta * tf * (s === "entering" ? 0.30 : 0.20); // radial shift
+        if (influence > 0.0001) {
+          const align = Math.max(0, touchNx * cosA + touchNy * sinA);
+          const tf = influence * align * INTERACTION_GAIN;
+          angle += delta * tf * 0.88; // tangential flow (gain applied via INTERACTION_GAIN)
+          r     -= delta * tf * (s === "entering" ? 0.072 : 0.048);
           // `angle` changed above; recompute for correct final position
           cosA = Math.cos(angle);
           sinA = Math.sin(angle);
@@ -393,7 +435,7 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
           Math.sin(angle*5 + elapsed*1.8 + dSeed[i]) *
           0.18 *
           (1 / Math.max(r, 1)) *
-          (1 + touchInfluence * 0.25);
+          (1 + influence * 0.22);
         const y = wave + Math.cos(angle*3 + elapsed*1.2 + dSeed[i]*2) * 0.08;
         posAttr.array[i*3]   = cosA * r;
         posAttr.array[i*3+1] = y;
@@ -405,7 +447,7 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
         let x = mistAttr.array[i*3], z = mistAttr.array[i*3+2];
         let r = Math.sqrt(x*x + z*z);
         let angle = Math.atan2(z, x);
-        angle += delta * (0.9 + 2.2 / Math.max(r, 0.35)) * (s === "entering" ? suckMult * 0.8 : 1);
+        angle += delta * (0.86 + 2.1 / Math.max(r, 0.35)) * (s === "entering" ? suckMult * 0.78 : 1);
         r -= delta * (0.35 + r * 0.04) * suckMult;
         if (r < 2.52) {
           r = mRespawnR[i];
@@ -414,11 +456,11 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
         let cosA = Math.cos(angle);
         let sinA = Math.sin(angle);
 
-        if (touchInfluence > 0.0001) {
+        if (influence > 0.0001) {
           const align = Math.max(0, touchNx * cosA + touchNy * sinA);
-          const tf = touchInfluence * align;
-          angle += delta * tf * 3.4;
-          r     -= delta * tf * (s === "entering" ? 0.25 : 0.17);
+          const tf = influence * align * INTERACTION_GAIN;
+          angle += delta * tf * 0.72;
+          r     -= delta * tf * (s === "entering" ? 0.060 : 0.042);
           // `angle` changed above; recompute for correct final position
           cosA = Math.cos(angle);
           sinA = Math.sin(angle);
@@ -430,46 +472,47 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
       }
       mistAttr.needsUpdate = true;
 
-      disk.rotation.y  += delta * 0.35;
-      disk.rotation.z  += delta * 0.08;
-      mist.rotation.y  -= delta * 0.55;
-      mist.rotation.z  += delta * 0.12;
-      ring.rotation.z  -= delta * 0.75;
+      disk.rotation.y  += delta * 0.31;
+      disk.rotation.z  += delta * 0.065;
+      mist.rotation.y  -= delta * 0.48;
+      mist.rotation.z  += delta * 0.10;
+      ring.rotation.z  -= delta * 0.68;
       if (nebula) nebula.rotation.y += delta * 0.003;
 
       // ── camera / effects for entering ─────────────────────────────────────
       if (s === "entering") {
         enterAccum += delta;
         const t  = Math.min(1, enterAccum / ENTER_SECONDS);
-        const e  = easeInOutCubic(t);
-        const kickT = Math.max(0, 1 - t / 0.85);
+        const e  = easeInOutQuint(t);
+        const kickT = Math.max(0, 1 - t / 0.88);
         const kick  = enteringKick * kickT;
 
-        // ── camera pull: smooth spiral into singularity ────────────────────
-        // phase 1 (0→0.6): graceful approach spiral
-        // phase 2 (0.6→1): violent snap-in
-        const phase2 = Math.max(0, (t - 0.6) / 0.4);
-        const snapE  = easeInCubic(phase2);
+        // ── camera pull: smoother spiral + softer late snap ─────────────────
+        const phase2 = Math.max(0, (t - 0.52) / 0.48);
+        const snapE  = easeInOutCubic(phase2);
 
-        camera.position.z = THREE.MathUtils.lerp(15, 0.18, easeOutQuart(t));
+        const tz = easeInOutQuint(t);
+        camera.position.z = THREE.MathUtils.lerp(15, 0.18, easeOutQuart(tz));
         camera.position.x =
-          Math.sin(t * Math.PI * 3.5) * 1.4 * (1 - snapE) * (1 - easeOutQuart(t) * 0.6);
+          Math.sin(t * Math.PI * 3.1) * 1.25 * (1 - snapE * 0.85) * (1 - easeOutQuart(t) * 0.55);
         camera.position.y =
           THREE.MathUtils.lerp(3, 0.05, e) +
-          Math.cos(t * Math.PI * 4)   * 0.5  * (1 - snapE);
+          Math.cos(t * Math.PI * 3.6) * 0.42 * (1 - snapE);
 
-        // ── camera shake (rapid + smooth, deterministic) ────────────────────
-        const shakeBase = kick * 0.26 + touchStrength * 0.18;
-        if (shakeBase > 0.0001) {
-          // smooth oscillation + touch-direction offset
-          const sx = Math.sin(elapsed * 38.0);
-          const sy = Math.cos(elapsed * 33.0);
-          camera.position.x += (sx * 0.55 + touchNx * 0.65) * shakeBase;
-          camera.position.y += (sy * 0.50 + touchNy * 0.55) * shakeBase;
+        // ── subtle camera shake (always gentle) ─────────────────────────────
+        const interact = Math.max(mouseHover, touchStrength);
+        const shakeBase =
+          kick * 0.038 +
+          interact * 0.032;
+        if (shakeBase > 0.00005) {
+          const sx = Math.sin(elapsed * 7.1);
+          const sy = Math.cos(elapsed * 8.4);
+          camera.position.x += (sx * 0.11 + touchNx * 0.09) * shakeBase;
+          camera.position.y += (sy * 0.10 + touchNy * 0.08) * shakeBase;
         }
 
         // ── FOV warp (fish-eye suck effect) ────────────────────────────────
-        camera.fov = 55 + easeInCubic(t) * 45; // 55° → 100° as you get sucked
+        camera.fov = 55 + easeInOutCubic(t) * 42; // smoother than cubic-in only
         camera.updateProjectionMatrix();
 
         camera.lookAt(0, 0, 0);
@@ -477,22 +520,20 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
         // ── radial blur / speed overlay ─────────────────────────────────────
         // Make the “rush” peak earlier so the void snap is visible before
         // `onEntered` fires and the canvas fades out.
-        const blurRamp = Math.max(0, Math.min(1, (t - 0.10) / 0.55));
+        const blurRamp = Math.max(0, Math.min(1, (t - 0.06) / 0.62));
 
-        // void pull: 0 at t≈0.70 → 1 by the ENTER_TRIGGER (t≈0.84)
-        const voidPull = Math.max(0, Math.min(1, (t - 0.70) / 0.14));
+        // void pull: align with longer ENTER_SECONDS
+        const voidPull = Math.max(0, Math.min(1, (t - 0.68) / Math.max(1e-6, ENTER_TRIGGER - 0.68)));
 
-        // intensity: fast ramp, then keep adding energy as the void engages
-        const intensity = easeInCubic(blurRamp) * (0.75 + 0.55 * voidPull);
+        const intensity = easeInOutCubic(blurRamp) * (0.62 + 0.48 * voidPull);
 
-        drawSpeedOverlay(speedCvs, intensity, Math.pow(voidPull, 1.25));
+        drawSpeedOverlay(speedCvs, intensity, Math.pow(voidPull, 1.15));
 
-        // CSS motion blur on the 3-D canvas itself
-        const cssBlur = intensity * 10 * (0.35 + 0.65 * voidPull);
+        // CSS blur — capped so transitions stay smooth (heavy blur = jank)
+        const cssBlur = Math.min(7.2, intensity * 6.2 * (0.38 + 0.62 * voidPull));
         setRendererBlur(renderer.domElement, cssBlur);
 
-        // tone mapping exposure pulse
-        renderer.toneMappingExposure = 1.05 + intensity * 1.9 + voidPull * 0.7;
+        renderer.toneMappingExposure = 1.05 + intensity * 1.55 + voidPull * 0.55;
 
         if (t >= ENTER_TRIGGER && !hasEntered) {
           hasEntered = true;
@@ -525,30 +566,31 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     };
     window.addEventListener("resize", handleResize);
 
-    const setTouchFromClient = (clientX: number, clientY: number) => {
-      const nx = (clientX / Math.max(1, window.innerWidth) - 0.5) * 2;
-      const ny = (clientY / Math.max(1, window.innerHeight) - 0.5) * 2;
-      const dist = Math.hypot(nx, ny);
-      // “near” center -> stronger effect
-      const near = Math.max(0, 1 - dist / 0.85);
+    const setPointerFromClient = (e: PointerEvent) => {
+      const nx = (e.clientX / Math.max(1, window.innerWidth) - 0.5) * 2;
+      const ny = (e.clientY / Math.max(1, window.innerHeight) - 0.5) * 2;
+      const near = Math.max(0, 1 - Math.hypot(nx, ny) / 0.85);
       touchNx = nx;
       touchNy = ny;
-      touchStrength = Math.max(touchStrength, near * 1.15);
+      // mouse “pointing” — no click required
+      if (e.pointerType === "mouse") {
+        mouseHover = Math.max(mouseHover, near * 0.58);
+      }
+      if (pointerActive && (pointerId === null || e.pointerId === pointerId)) {
+        touchStrength = Math.max(touchStrength, near * 1.18);
+      }
     };
 
     const onPointerDown = (e: PointerEvent) => {
       if (stageRef.current !== "intro" && stageRef.current !== "entering") return;
       pointerActive = true;
       pointerId = e.pointerId;
-      // prevent accidental page interactions while we "grab" the void
-      setTouchFromClient(e.clientX, e.clientY);
+      setPointerFromClient(e);
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      if (!pointerActive) return;
-      if (pointerId !== null && e.pointerId !== pointerId) return;
       if (stageRef.current !== "intro" && stageRef.current !== "entering") return;
-      setTouchFromClient(e.clientX, e.clientY);
+      setPointerFromClient(e);
     };
 
     const onPointerUpOrCancel = (e: PointerEvent) => {
