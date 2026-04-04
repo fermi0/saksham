@@ -277,15 +277,7 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     );
     scene.add(horizon);
 
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color("#fe8019"),
-      transparent: true, opacity: 0.85,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(2.52, 2.78, 96), ringMat);
-    ring.rotation.x = Math.PI / 2 + 0.18;
-    scene.add(ring);
+    // (Yellow photon ring was physically removed as per request for pure geometry scaling)
 
     const palette = [
       new THREE.Color("#d65d0e"), new THREE.Color("#fe8019"),
@@ -374,6 +366,39 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
     // Re-use identical Material and Program to eliminate context switching and double shader compilation
     const mist = new THREE.Points(mistGeo, diskMat);
     scene.add(mist);
+
+    // ── rotated plasma mist ring ─────────────────────────────────────────────
+    const ringCount = 100000;
+    const rPos = new Float32Array(ringCount * 3);
+    const rCol = new Float32Array(ringCount * 3);
+    const rBaseR = new Float32Array(ringCount);
+    const rBaseA = new Float32Array(ringCount);
+    const rSeed = new Float32Array(ringCount);
+    const rRespawnR = new Float32Array(ringCount);
+    const rSize = new Float32Array(ringCount);
+    for (let i = 0; i < ringCount; i++) {
+      const r = 2.52 + Math.pow(Math.random(), 2) * 0.26; 
+      const a = Math.random() * Math.PI * 2;
+      rPos[i*3] = 0; rPos[i*3+1] = 0; rPos[i*3+2] = 0;
+      const c = new THREE.Color().setHSL(0.08 + Math.random()*0.05, 0.9, 0.45 + Math.random()*0.2);
+      rCol[i*3]=c.r*1.1; rCol[i*3+1]=c.g*1.1; rCol[i*3+2]=c.b*1.1;
+      rBaseR[i] = r;
+      rBaseA[i] = a;
+      rSeed[i] = Math.random() * Math.PI * 2;
+      rRespawnR[i] = r;
+      rSize[i] = Math.random() * 0.005 + 0.002;
+    }
+    const ringGeo = new THREE.BufferGeometry();
+    ringGeo.setAttribute("position", new THREE.BufferAttribute(rPos, 3));
+    ringGeo.setAttribute("color",    new THREE.BufferAttribute(rCol, 3));
+    ringGeo.setAttribute("aBaseRadius", new THREE.BufferAttribute(rBaseR, 1));
+    ringGeo.setAttribute("aBaseAngle", new THREE.BufferAttribute(rBaseA, 1));
+    ringGeo.setAttribute("aSeed", new THREE.BufferAttribute(rSeed, 1));
+    ringGeo.setAttribute("aRespawnR", new THREE.BufferAttribute(rRespawnR, 1));
+    ringGeo.setAttribute("size", new THREE.BufferAttribute(rSize, 1));
+    const pRing = new THREE.Points(ringGeo, diskMat);
+    pRing.rotation.x = 0.18;
+    scene.add(pRing);
 
     // stars
     const starsTotal = 26_000;
@@ -476,8 +501,8 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
       disk.rotation.z  += delta * 0.065;
       mist.rotation.y  -= delta * 0.48;
       mist.rotation.z  += delta * 0.10;
-      ring.rotation.z  -= delta * 0.68;
       if (nebula) nebula.rotation.y += delta * 0.003;
+      pRing.rotation.y -= delta * 3.5;
 
       // ── camera / effects for entering ─────────────────────────────────────
       if (s === "entering") {
@@ -631,10 +656,9 @@ export function BlackHoleScene({ stage, onEntered }: BlackHoleSceneProps) {
       timer.dispose();
       if (nebulaTex) nebulaTex.dispose();
       // dispose geometries / materials
-      [diskGeo, mistGeo, starsGeo].forEach(g => g.dispose());
-      [diskMat, starsMat, ringMat].forEach(m => m.dispose());
+      [diskGeo, mistGeo, starsGeo, ringGeo].forEach(g => g.dispose());
+      [diskMat, starsMat].forEach(m => m.dispose());
       horizon.geometry.dispose(); (horizon.material as THREE.Material).dispose();
-      ring.geometry.dispose();
       if (nebula) { nebula.geometry.dispose(); (nebula.material as THREE.Material).dispose(); }
       renderer.dispose();
       renderer.domElement.remove();

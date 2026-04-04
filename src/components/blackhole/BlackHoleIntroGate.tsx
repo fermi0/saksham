@@ -14,8 +14,8 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
   const pathname = usePathname();
   const [stage, setStage] = useState<BlackHoleStage>("pre-intro");
 
-  const handleStart       = () => setStage("intro");
-  const handleEnter       = () => setStage("entering");
+  const handleStart = () => setStage("intro");
+  const handleEnter = () => setStage("entering");
   const handleEnteredBlackHole = () => setStage("expanding");
 
   useEffect(() => {
@@ -64,9 +64,9 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
         initial={{ opacity: 0, scale: 1 }}
         animate={{
           opacity: stage === "intro" || stage === "entering" ? 1 : 0,
-          scale:   stage === "intro" || stage === "entering" ? 1 : 1.12,
+          scale: stage === "intro" || stage === "entering" ? 1 : 1.12,
         }}
-        transition={{ 
+        transition={{
           duration: (stage === "expanding" || stage === "greeting" || stage === "home") ? 3.2 : 1.5,
           ease: "easeOut"
         }}
@@ -111,11 +111,11 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
         initial={{ clipPath: "circle(0% at 50% 50%)", opacity: 0 }}
         animate={{
           clipPath: isRising ? "circle(150% at 50% 50%)" : "circle(0% at 50% 50%)",
-          opacity:  isRising ? 1 : 0,
+          opacity: isRising ? 1 : 0,
         }}
         transition={{
           clipPath: { duration: 2.6, ease: [0.16, 1, 0.3, 1] }, // spring-ish ease
-          opacity:  { duration: 0.6, ease: "easeOut" },
+          opacity: { duration: 0.6, ease: "easeOut" },
         }}
         style={{ pointerEvents: isRising ? "auto" : "none" }}
       >
@@ -155,14 +155,14 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
           initial={{ opacity: 0, scale: 0.94, filter: "blur(12px)" }}
           animate={{
             opacity: stage === "greeting" ? 1 : 0,
-            scale:   stage === "greeting" ? 1 : 1.04,
-            filter:  stage === "greeting" ? "blur(0px)" : "blur(12px)",
+            scale: stage === "greeting" ? 1 : 1.04,
+            filter: stage === "greeting" ? "blur(0px)" : "blur(12px)",
           }}
           transition={{ duration: 1.1, ease: [0.25, 1, 0.5, 1] }}
           className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
         >
           <h2 className="font-sans text-6xl font-extralight tracking-wider text-[#fbf1c7]/90 md:text-8xl"
-              style={{ textShadow: "0 0 35px rgba(180,210,255,0.25)" }}>
+            style={{ textShadow: "0 0 35px rgba(180,210,255,0.25)" }}>
             Hi
           </h2>
         </motion.div>
@@ -173,13 +173,13 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
           initial={{ opacity: 0, y: 40, filter: "blur(8px)" }}
           animate={{
             opacity: stage === "home" ? 1 : 0,
-            y:       stage === "home" ? 0 : 40,
-            filter:  stage === "home" ? "blur(0px)" : "blur(8px)",
+            y: stage === "home" ? 0 : 40,
+            filter: stage === "home" ? "blur(0px)" : "blur(8px)",
           }}
           transition={{
             opacity: { duration: 1.6, ease: [0.25, 1, 0.5, 1], delay: 0.3 },
-            y:       { duration: 1.6, ease: [0.25, 1, 0.5, 1], delay: 0.3 },
-            filter:  { duration: 1.2, ease: "easeOut",          delay: 0.3 },
+            y: { duration: 1.6, ease: [0.25, 1, 0.5, 1], delay: 0.3 },
+            filter: { duration: 1.2, ease: "easeOut", delay: 0.3 },
           }}
           style={{ pointerEvents: stage === "home" ? "auto" : "none" }}
           className="relative z-20 flex min-h-screen flex-col px-8 py-10 md:px-16 md:py-16"
@@ -192,9 +192,9 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
               SAKSHAM
             </Link>
             <nav className="flex gap-4 text-xs font-medium tracking-[0.15em] text-[#a89984] md:gap-8 md:text-sm md:tracking-[0.2em]">
-              <Link href="/"      className={pathname === "/"      ? "text-[#fe8019]" : "transition-colors hover:text-[#fe8019]"}>Index</Link>
+              <Link href="/" className={pathname === "/" ? "text-[#fe8019]" : "transition-colors hover:text-[#fe8019]"}>Index</Link>
               <Link href="/about" className={pathname === "/about" ? "text-[#fe8019]" : "transition-colors hover:text-[#fe8019]"}>About</Link>
-              <Link href="/blog"  className={pathname === "/blog"  ? "text-[#fe8019]" : "transition-colors hover:text-[#fe8019]"}>Blog</Link>
+              <Link href="/blog" className={pathname === "/blog" ? "text-[#fe8019]" : "transition-colors hover:text-[#fe8019]"}>Blog</Link>
             </nav>
           </header>
 
