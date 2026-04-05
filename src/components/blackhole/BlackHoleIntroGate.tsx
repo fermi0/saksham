@@ -13,8 +13,26 @@ type BlackHoleIntroGateProps = {
 export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps) {
   const pathname = usePathname();
   const [stage, setStage] = useState<BlackHoleStage>("pre-intro");
+  
+  // Session hydration and bypass state
+  const [isMounted, setIsMounted] = useState(false);
+  const [skipped, setSkipped] = useState(false);
 
-  const handleStart = () => setStage("intro");
+  useEffect(() => {
+    const today = new Date().toDateString();
+    const lastPlayed = localStorage.getItem("blackhole_played_date");
+    if (lastPlayed === today) {
+      setSkipped(true);
+      setStage("home");
+    }
+    setIsMounted(true);
+  }, []);
+
+  const handleStart = () => {
+    setStage("intro");
+    localStorage.setItem("blackhole_played_date", new Date().toDateString());
+  };
+
   const handleEnter = () => setStage("entering");
   const handleEnteredBlackHole = () => setStage("expanding");
 
@@ -31,12 +49,18 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
 
   const isRising = stage === "expanding" || stage === "greeting" || stage === "home";
 
+  // Prevent server hydration mismatch on the first tick
+  if (!isMounted) {
+    return <div className="min-h-screen bg-[#1d2021]" />;
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#1d2021] font-sans text-[#ebdbb2] selection:bg-[#fabd2f] selection:text-[#1d2021]">
 
       {/* ── standby screen ─────────────────────────────────────────────────── */}
-      <motion.div
-        key="pre-intro"
+      {!skipped && (
+        <motion.div
+          key="pre-intro"
         initial={{ opacity: 1, y: 0 }}
         animate={{
           opacity: stage === "pre-intro" ? 1 : 0,
@@ -57,8 +81,10 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
           Initialize sequence
         </button>
       </motion.div>
+      )}
 
       {/* ── 3-D black hole canvas ───────────────────────────────────────────── */}
+      {!skipped && (
       <motion.div
         className="absolute inset-0 z-0 bg-black"
         initial={{ opacity: 0, scale: 1 }}
@@ -76,8 +102,10 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
       >
         <BlackHoleScene stage={stage} onEntered={handleEnteredBlackHole} />
       </motion.div>
+      )}
 
       {/* ── "cross event horizon" button ────────────────────────────────────── */}
+      {!skipped && (
       <motion.div
         key="intro-controls"
         initial={{ opacity: 0, y: 24 }}
@@ -103,12 +131,13 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
           <span className="relative z-10">Cross event horizon</span>
         </button>
       </motion.div>
+      )}
 
       {/* ── RISING PANEL — full-page emergence ──────────────────────────────── */}
       <motion.div
         key="emerge"
         className="absolute inset-0 z-20 flex min-h-screen flex-col"
-        initial={{ clipPath: "circle(0% at 50% 50%)", opacity: 0 }}
+        initial={skipped ? false : { clipPath: "circle(0% at 50% 50%)", opacity: 0 }}
         animate={{
           clipPath: isRising ? "circle(150% at 50% 50%)" : "circle(0% at 50% 50%)",
           opacity: isRising ? 1 : 0,
@@ -126,7 +155,7 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
         {/* warm amber vignette — fades in after greeting */}
         <motion.div
           className="pointer-events-none absolute inset-0"
-          initial={{ opacity: 0 }}
+          initial={skipped ? false : { opacity: 0 }}
           animate={{ opacity: stage === "home" ? 1 : 0 }}
           transition={{ duration: 1.8, ease: "easeInOut", delay: 0.4 }}
           style={{
@@ -138,7 +167,7 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
         {/* subtle scanline texture overlay — depth & richness */}
         <motion.div
           className="pointer-events-none absolute inset-0 mix-blend-overlay"
-          initial={{ opacity: 0 }}
+          initial={skipped ? false : { opacity: 0 }}
           animate={{ opacity: stage === "home" ? 0.04 : 0 }}
           transition={{ duration: 2.2, ease: "easeInOut", delay: 0.6 }}
           style={{
@@ -150,6 +179,7 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
         {/* The 3D Canvas itself now natively cross-fades backwards smoothly. No artificial white mask is needed to hide glitching. */}
 
         {/* ── "Hi" greeting ─────────────────────────────────────────────────── */}
+        {!skipped && (
         <motion.div
           key="greeting-text"
           initial={{ opacity: 0, scale: 0.94, filter: "blur(12px)" }}
@@ -166,11 +196,12 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
             Hi
           </h2>
         </motion.div>
+        )}
 
         {/* ── home interface ─────────────────────────────────────────────────── */}
         <motion.div
           key="home-interface"
-          initial={{ opacity: 0, y: 40, filter: "blur(8px)" }}
+          initial={skipped ? false : { opacity: 0, y: 40, filter: "blur(8px)" }}
           animate={{
             opacity: stage === "home" ? 1 : 0,
             y: stage === "home" ? 0 : 40,
