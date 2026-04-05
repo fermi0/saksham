@@ -94,34 +94,10 @@ void main() {
 
   vec3 col = clamp(vec3(r, g, b), 0.0, 1.0);
 
-  // ── 3. Chroma key in YCbCr space ─────────────────────────────────────────────
-  vec3 ycbcr   = rgb2ycbcr(col);
-  vec3 bgYcbcr = rgb2ycbcr(u_bg);
-
-  float chromaDist = distance(ycbcr.yz, bgYcbcr.yz);
-  float alpha = smoothstep(KEY_LO, KEY_HI, chromaDist);
-
-  // Spill suppression
-  float spill = 1.0 - smoothstep(KEY_HI * 0.5, KEY_HI * 1.4, chromaDist);
-  float luma  = ycbcr.x;
-  col = mix(col, vec3(luma), spill * SPILL_STR);
-
-  // ── 4. Hologram tint (cyan / teal shift) ───────────────────────────────────
-  vec3 holo = vec3(
-    col.r * 0.18 + col.g * 0.04,
-    col.g * 0.80 + col.b * 0.12 + 0.07,
-    col.b * 1.25 + col.g * 0.08 + 0.12
-  );
-  
-  // Shift colors gently during glitch
-  vec2 glitchSeed = vec2(uv.y, u_time);
-  holo = mix(holo, holo.gbr * 1.25, isGlitch * hash(glitchSeed));
-
-  // Blend bright highlights back toward natural
-  holo = mix(holo, col * vec3(0.55, 0.92, 1.08), smoothstep(0.50, 0.80, luma));
-
-  // Gamma push for punchier contrast
-  holo = pow(max(holo, vec3(0.0)), vec3(0.84));
+  // ── 3. Base Color & Alpha (Color Removal / Tinting sequence disabled) ──────
+  float alpha = texture2D(u_tex, uv).a; 
+  vec3 holo = col;
+  float luma = 0.299 * col.r + 0.587 * col.g + 0.114 * col.b;
 
   // ── 5a. CRT Scan lines & Dot matrix ────────────────────────────────────────
   float sl      = sin(uv.y * u_res.y * 3.14159 * 2.8);
@@ -169,6 +145,9 @@ void main() {
   float blendRight = smoothstep(0.0, 0.01, 1.0 - uv.x); // tiny 1% anti-alias for right edge
   float blendX = blendLeft * blendRight;
   finalA *= blendX;
+  
+  // Make the entire hologram globally more transparent
+  finalA *= 0.85; // 85% base opacity to allow the site to show through
 
   // Random static noise on the edges
   float noise = hash(uv + vec2(u_time));
@@ -414,13 +393,13 @@ export default function JoiHologram() {
             : "none",
         }}
       >
-        <canvas 
-           ref={canvasRef} 
-           className="absolute inset-0 h-full w-full" 
-           style={{ 
-             objectFit: isMobile ? "cover" : "contain", 
-             objectPosition: isMobile ? "center" : "right bottom" 
-           }} 
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 h-full w-full"
+          style={{
+            objectFit: isMobile ? "cover" : "contain",
+            objectPosition: isMobile ? "center" : "right bottom"
+          }}
         />
 
       </div>
