@@ -1,8 +1,6 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { BlackHoleScene, type BlackHoleStage } from "@/components/blackhole/BlackHoleScene";
 
@@ -11,7 +9,6 @@ type BlackHoleIntroGateProps = {
 };
 
 export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps) {
-  const pathname = usePathname();
   const [stage, setStage] = useState<BlackHoleStage>("pre-intro");
 
   const [isMounted, setIsMounted] = useState(false);
@@ -55,7 +52,7 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-black font-sans text-[#ebdbb2] selection:bg-[#fe8019] selection:text-black">
+    <div className="relative min-h-screen overflow-hidden bg-black font-sans text-[#ebdbb2] selection:bg-[#fabd2f] selection:text-[#1d2021]">
 
       {/* ── Standby Screen ─────────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -141,50 +138,89 @@ export default function BlackHoleIntroGate({ children }: BlackHoleIntroGateProps
         )}
       </AnimatePresence>
 
-      {/* ── Rising Panel — Website Content Emergence ────────────────────────── */}
+      {/* ── RISING PANEL — full-page emergence ──────────────────────────────── */}
       <motion.div
+        key="emerge"
         className="absolute inset-0 z-20 flex min-h-screen flex-col"
-        initial={skipped ? false : { opacity: 0 }}
+        initial={skipped ? false : { clipPath: "circle(0% at 50% 50%)", opacity: 0 }}
         animate={{
+          clipPath: isRising ? "circle(150% at 50% 50%)" : "circle(0% at 50% 50%)",
           opacity: isRising ? 1 : 0,
-          background: stage === "home" ? "#1d2021" : "black"
         }}
-        transition={{ duration: 2 }}
+        transition={{
+          clipPath: { duration: 2.6, ease: [0.16, 1, 0.3, 1] }, // spring-ish ease
+          opacity: { duration: 0.6, ease: "easeOut" },
+        }}
         style={{ pointerEvents: isRising ? "auto" : "none" }}
       >
-        {/* Removed jarring flash, keeping transition smooth and dark */}
+        {/* ── layered background — buttery Gruvbox warm dark ────────────────── */}
+        {/* base */}
+        <div className="pointer-events-none absolute inset-0 bg-[#1d2021]" />
 
-        {/* Home Interface */}
+        {/* warm amber vignette — fades in after greeting */}
         <motion.div
-          initial={skipped ? false : { opacity: 0, y: 50 }}
+          className="pointer-events-none absolute inset-0"
+          initial={skipped ? false : { opacity: 0 }}
+          animate={{ opacity: stage === "home" ? 1 : 0 }}
+          transition={{ duration: 1.8, ease: "easeInOut", delay: 0.4 }}
+          style={{
+            background:
+              "radial-gradient(ellipse 80% 60% at 50% 45%, rgba(214,93,14,0.10) 0%, rgba(29,32,33,0) 70%)",
+          }}
+        />
+
+        {/* subtle scanline texture overlay — depth & richness */}
+        <motion.div
+          className="pointer-events-none absolute inset-0 mix-blend-overlay"
+          initial={skipped ? false : { opacity: 0 }}
+          animate={{ opacity: stage === "home" ? 0.04 : 0 }}
+          transition={{ duration: 2.2, ease: "easeInOut", delay: 0.6 }}
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(0deg, rgba(251,241,199,0.5) 0px, rgba(251,241,199,0.5) 1px, transparent 1px, transparent 3px)",
+          }}
+        />
+
+        {/* The 3D Canvas itself now natively cross-fades backwards smoothly. No artificial white mask is needed to hide glitching. */}
+
+        {/* ── "Hi" greeting ─────────────────────────────────────────────────── */}
+        {!skipped && (
+        <motion.div
+          key="greeting-text"
+          initial={{ opacity: 0, scale: 0.94, filter: "blur(12px)" }}
+          animate={{
+            opacity: stage === "greeting" ? 1 : 0,
+            scale: stage === "greeting" ? 1 : 1.04,
+            filter: stage === "greeting" ? "blur(0px)" : "blur(12px)",
+          }}
+          transition={{ duration: 1.1, ease: [0.25, 1, 0.5, 1] }}
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+        >
+          <h2 className="font-sans text-6xl font-extralight tracking-wider text-[#fbf1c7]/90 md:text-8xl"
+            style={{ textShadow: "0 0 35px rgba(180,210,255,0.25)" }}>
+            Hi
+          </h2>
+        </motion.div>
+        )}
+
+        {/* ── site content reveal ──────────────────────────────────────────── */}
+        <motion.div
+          key="home-interface"
+          initial={skipped ? false : { opacity: 0, y: 40, filter: "blur(8px)" }}
           animate={{
             opacity: stage === "home" ? 1 : 0,
-            y: stage === "home" ? 0 : 50,
+            y: stage === "home" ? 0 : 40,
+            filter: stage === "home" ? "blur(0px)" : "blur(8px)",
           }}
-          transition={{ duration: 2, delay: 0.5 }}
-          className="relative z-20 flex min-h-screen flex-col px-8 py-10 md:px-16 md:py-16"
+          transition={{
+            opacity: { duration: 1.6, ease: [0.25, 1, 0.5, 1], delay: 0.3 },
+            y: { duration: 1.6, ease: [0.25, 1, 0.5, 1], delay: 0.3 },
+            filter: { duration: 1.2, ease: "easeOut", delay: 0.3 },
+          }}
+          style={{ pointerEvents: stage === "home" ? "auto" : "none" }}
+          className="relative z-20 flex min-h-screen flex-col"
         >
-          <header className="flex items-center justify-between mb-12">
-            <Link
-              href="/"
-              className="text-2xl font-bold tracking-[0.4em] text-[#fe8019]"
-            >
-              SAKSHAM
-            </Link>
-            <nav className="flex gap-8 text-xs font-medium tracking-[0.3em] text-[#a89984]">
-              <Link href="/" className={pathname === "/" ? "text-[#fe8019]" : "hover:text-[#fe8019] transition-colors"}>Index</Link>
-              <Link href="/about" className={pathname === "/about" ? "text-[#fe8019]" : "hover:text-[#fe8019] transition-colors"}>About</Link>
-              <Link href="/blog" className={pathname === "/blog" ? "text-[#fe8019]" : "hover:text-[#fe8019] transition-colors"}>Blog</Link>
-            </nav>
-          </header>
-
-          <main className="flex-1">
-            {children}
-          </main>
-
-          <footer className="mt-auto pt-12 text-center text-[10px] tracking-[0.5em] text-[#504945] uppercase">
-            Singularity Traversed • Welcome to the Other Side
-          </footer>
+          {children}
         </motion.div>
       </motion.div>
     </div>
